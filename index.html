@@ -1,0 +1,774 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Barn Layout Planner</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js" integrity="sha512-BNaRQnYJYiPSqHHDb58B0yaPfCu+Wgds8Gp/gU33kqBtgNS4tSPHuGibyoeqMV/TJlSKda6FXzoEyYGjTe+vXA==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+    <style>
+        /* Custom styles */
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        #barn-floor {
+            position: relative;
+            background-color: #f5deb3;
+            border: 2px dashed #8b4513;
+            min-height: 60vh;
+            height: 70vh;
+            width: 100%;
+            max-width: 1000px;
+            margin: 20px auto;
+            overflow: hidden;
+            background-image: linear-gradient(to right, rgba(139, 69, 19, 0.1) 1px, transparent 1px),
+                              linear-gradient(to bottom, rgba(139, 69, 19, 0.1) 1px, transparent 1px);
+            background-size: 20px 20px;
+            background-position: top left;
+            background-repeat: repeat;
+            border-radius: 0.5rem;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            transition: background-image 0.3s ease-in-out;
+            cursor: default;
+        }
+        #barn-floor.setting-scale { cursor: crosshair; }
+        .table {
+            position: absolute; cursor: grab; border: 2px solid #555;
+            background-color: rgba(255, 255, 255, 0.85); display: flex; align-items: center; justify-content: center;
+            font-size: 0.75rem; font-weight: bold; color: #333; user-select: none;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+            transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out, background-color 0.2s ease-in-out, width 0.2s ease-in-out, height 0.2s ease-in-out;
+            overflow: hidden; text-align: center;
+            -webkit-user-select: none; -moz-user-select: none; -ms-user-select: none; user-select: none;
+        }
+        .table.round { border-radius: 50%; }
+        .table.rectangle { border-radius: 0.375rem; }
+        .table.selected {
+            border-color: #3b82f6; background-color: rgba(255, 255, 255, 0.95);
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.5); z-index: 10;
+        }
+        /* Class to temporarily hide selection styles during save */
+        .table.hide-selection {
+             border-color: #555 !important; /* Revert to default border */
+             box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2) !important; /* Revert to default shadow */
+        }
+        .table:active { cursor: grabbing; box-shadow: 0 5px 15px rgba(0, 0, 0, 0.3); }
+        #message-box {
+            position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+            background-color: rgba(0, 0, 0, 0.7); color: white; padding: 10px 20px;
+            border-radius: 0.375rem; z-index: 1000; opacity: 0;
+            transition: opacity 0.5s ease-in-out; pointer-events: none;
+        }
+        #message-box.show { opacity: 1; }
+        #floor-plan-input { display: none; }
+        .size-input {
+            width: 60px; padding: 4px 8px; border: 1px solid #ccc;
+            border-radius: 0.25rem; text-align: right; -moz-appearance: textfield;
+        }
+        .size-input::-webkit-outer-spin-button, .size-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+        .size-label { font-size: 0.875rem; color: #555; margin-right: 2px; white-space: nowrap; }
+        .scale-marker {
+            position: absolute; width: 10px; height: 10px; background-color: red;
+            border-radius: 50%; border: 1px solid darkred; transform: translate(-50%, -50%);
+            pointer-events: none; z-index: 50;
+        }
+        .disabled-overlay {
+             position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+             background-color: rgba(200, 200, 200, 0.4); border-radius: 0.5rem; z-index: 5;
+             cursor: not-allowed; display: flex; align-items: center; justify-content: center;
+             color: #444; font-weight: bold; text-align: center; padding: 10px; font-size: 0.875rem;
+        }
+        .relative-container { position: relative; }
+        @keyframes pulse-border {
+            0%, 100% { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.7); }
+            50% { box-shadow: 0 0 0 4px rgba(59, 130, 246, 0); }
+        }
+        .animate-pulse-border { animation: pulse-border 1.5s infinite; }
+
+        /* Custom Modal Styles */
+        #scale-modal-overlay {
+            position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+            background-color: rgba(0, 0, 0, 0.5); /* Semi-transparent black */
+            display: flex; align-items: center; justify-content: center;
+            z-index: 1100; /* Above message box */
+            opacity: 0;
+            transition: opacity 0.3s ease-in-out;
+            pointer-events: none; /* Hidden by default */
+        }
+        #scale-modal-overlay.show {
+            opacity: 1;
+            pointer-events: auto; /* Allow interaction when shown */
+        }
+        #scale-modal {
+            background-color: white;
+            padding: 2rem;
+            border-radius: 0.5rem;
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.3);
+            width: 90%;
+            max-width: 400px; /* Max width for the modal */
+            text-align: center;
+        }
+        #scale-modal p { margin-bottom: 1rem; color: #333; }
+        #scale-modal input {
+            width: 80%;
+            padding: 0.5rem;
+            border: 1px solid #ccc;
+            border-radius: 0.25rem;
+            margin-bottom: 1.5rem;
+            text-align: center;
+            font-size: 1rem;
+        }
+        #scale-modal button {
+            padding: 0.6rem 1.2rem;
+            border-radius: 0.375rem;
+            font-weight: bold;
+            cursor: pointer;
+            transition: background-color 0.2s ease;
+            margin: 0 0.5rem;
+        }
+        #scale-modal-ok { background-color: #2563eb; color: white; border: none; } /* Blue */
+        #scale-modal-ok:hover { background-color: #1d4ed8; }
+        #scale-modal-cancel { background-color: #d1d5db; color: #374151; border: none; } /* Gray */
+        #scale-modal-cancel:hover { background-color: #9ca3af; }
+
+    </style>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700&display=swap" rel="stylesheet">
+</head>
+<body class="bg-gray-100 p-4 md:p-8">
+
+    <h1 class="text-2xl md:text-3xl font-bold text-center text-gray-800 mb-6">Barn Layout Planner</h1>
+
+    <div id="toolbar" class="flex flex-col items-center gap-y-4 mb-6 p-4 bg-white rounded-lg shadow-md max-w-6xl mx-auto">
+        {/* Row 1: Floor Plan and Scale */}
+        <div class="flex flex-wrap justify-center items-center gap-x-6 gap-y-3 w-full">
+             <div class="flex items-center gap-x-3 gap-y-2 flex-wrap justify-center border-r border-gray-300 pr-4 mr-2">
+                 <span class="font-semibold text-gray-700 whitespace-nowrap">Floor Plan:</span>
+                 <label for="floor-plan-input" class="cursor-pointer bg-purple-500 hover:bg-purple-600 text-white font-bold py-2 px-4 rounded-lg shadow transition duration-150 ease-in-out text-sm">
+                     Upload Image
+                 </label>
+                 <input type="file" id="floor-plan-input" accept="image/*">
+                 <button id="remove-background" class="bg-gray-400 hover:bg-gray-500 text-white font-bold py-2 px-4 rounded-lg shadow transition duration-150 ease-in-out text-sm">
+                     Remove BG
+                 </button>
+            </div>
+             <div class="flex items-center gap-x-3 gap-y-2 flex-wrap justify-center">
+                 <span class="font-semibold text-gray-700 whitespace-nowrap">Scale:</span>
+                 <button id="set-scale" class="bg-cyan-500 hover:bg-cyan-600 text-white font-bold py-2 px-4 rounded-lg shadow transition duration-150 ease-in-out text-sm">
+                     Set Scale
+                 </button>
+                 <select id="scale-unit" class="border border-gray-300 rounded-md p-2 text-sm">
+                     <option value="ft">Feet (ft)</option>
+                     <option value="m">Meters (m)</option>
+                 </select>
+                 <span id="scale-status" class="text-sm text-gray-600 font-medium ml-2 min-w-[100px] text-center">Scale not set</span>
+             </div>
+        </div>
+         {/* Row 2: Table Creation/Sizing */}
+        <div id="table-controls" class="relative-container flex flex-wrap justify-center items-center gap-x-4 gap-y-3 w-full border-t border-gray-200 pt-4">
+             <div id="table-controls-overlay" class="disabled-overlay">Set scale first to enable table controls</div>
+             <span class="font-semibold text-gray-700 whitespace-nowrap">Add/Size Table (<span id="size-unit-label">px</span>):</span>
+             <div class="flex items-center gap-x-2 gap-y-1 p-2 border border-gray-200 rounded-lg flex-wrap">
+                 <button id="add-round-table" class="bg-blue-500 hover:bg-blue-600 text-white font-bold py-1 px-3 rounded-lg shadow text-sm">Round</button>
+                 <label for="round-diameter" class="size-label">Dia:</label>
+                 <input type="number" id="round-diameter" class="size-input" value="8" min="0.1" step="0.1">
+             </div>
+             <div class="flex items-center gap-x-2 gap-y-1 p-2 border border-gray-200 rounded-lg flex-wrap">
+                 <button id="add-rect-table" class="bg-green-500 hover:bg-green-600 text-white font-bold py-1 px-3 rounded-lg shadow text-sm">Rect</button>
+                 <label for="rect-width" class="size-label">W:</label>
+                 <input type="number" id="rect-width" class="size-input" value="6" min="0.1" step="0.1">
+                 <label for="rect-height" class="size-label ml-1">H:</label>
+                 <input type="number" id="rect-height" class="size-input" value="3" min="0.1" step="0.1">
+             </div>
+             <button id="apply-size" class="bg-indigo-500 hover:bg-indigo-600 text-white font-bold py-2 px-4 rounded-lg shadow transition duration-150 ease-in-out text-sm">
+                 Apply Size
+             </button>
+        </div>
+        {/* Row 3: Selected Table Actions & Clear All */}
+         <div id="selected-table-controls" class="relative-container flex flex-wrap justify-center items-center gap-x-4 gap-y-3 w-full border-t border-gray-200 pt-4">
+             <div id="selected-controls-overlay" class="disabled-overlay">Select a table to enable actions</div>
+            <span class="font-semibold text-gray-700 mr-2 whitespace-nowrap">Selected Table:</span>
+            <button id="rotate-left" class="bg-yellow-500 hover:bg-yellow-600 text-white font-bold py-2 px-4 rounded-lg shadow transition duration-150 ease-in-out text-sm">
+                Rotate Left
+            </button>
+             <button id="rotate-right" class="bg-yellow-500 hover:bg-yellow-600 text-white font-bold py-2 px-4 rounded-lg shadow transition duration-150 ease-in-out text-sm">
+                Rotate Right
+            </button>
+            <button id="delete-table" class="bg-red-500 hover:bg-red-600 text-white font-bold py-2 px-4 rounded-lg shadow transition duration-150 ease-in-out text-sm">
+                Delete
+            </button>
+             {/* Add Save Button Here */}
+             <button id="save-layout" class="bg-teal-500 hover:bg-teal-600 text-white font-bold py-2 px-4 rounded-lg shadow transition duration-150 ease-in-out text-sm ml-4">
+                 Save Layout
+             </button>
+             <button id="clear-all" class="bg-gray-500 hover:bg-gray-600 text-white font-bold py-2 px-4 rounded-lg shadow transition duration-150 ease-in-out text-sm ml-auto">
+                Clear All
+            </button>
+        </div>
+    </div>
+
+    {/* Barn Floor Area */}
+    <div id="barn-floor">
+        {/* Scale markers and tables added dynamically */}
+    </div>
+
+    {/* Message Box Area */}
+    <div id="message-box"></div>
+
+    {/* Custom Scale Input Modal */}
+    <div id="scale-modal-overlay">
+        <div id="scale-modal">
+            <p id="scale-modal-message">Enter distance:</p>
+            <input type="number" id="scale-modal-input" min="0.01" step="0.01" placeholder="e.g., 20.5">
+            <div>
+                <button id="scale-modal-ok">OK</button>
+                <button id="scale-modal-cancel">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+
+    <script>
+        // --- DOM Elements ---
+        // (Existing elements...)
+        const barnFloor = document.getElementById('barn-floor');
+        const messageBox = document.getElementById('message-box');
+        const floorPlanInput = document.getElementById('floor-plan-input');
+        const removeBackgroundBtn = document.getElementById('remove-background');
+        const setScaleBtn = document.getElementById('set-scale');
+        const scaleUnitSelect = document.getElementById('scale-unit');
+        const scaleStatusDisplay = document.getElementById('scale-status');
+        const tableControlsDiv = document.getElementById('table-controls');
+        const tableControlsOverlay = document.getElementById('table-controls-overlay');
+        const sizeUnitLabel = document.getElementById('size-unit-label');
+        const addRoundTableBtn = document.getElementById('add-round-table');
+        const roundDiameterInput = document.getElementById('round-diameter');
+        const addRectTableBtn = document.getElementById('add-rect-table');
+        const rectWidthInput = document.getElementById('rect-width');
+        const rectHeightInput = document.getElementById('rect-height');
+        const applySizeBtn = document.getElementById('apply-size');
+        const selectedTableControlsDiv = document.getElementById('selected-table-controls');
+        const selectedControlsOverlay = document.getElementById('selected-controls-overlay');
+        const rotateLeftBtn = document.getElementById('rotate-left');
+        const rotateRightBtn = document.getElementById('rotate-right');
+        const deleteBtn = document.getElementById('delete-table');
+        const clearAllBtn = document.getElementById('clear-all');
+        // Modal elements
+        const scaleModalOverlay = document.getElementById('scale-modal-overlay');
+        const scaleModalMessage = document.getElementById('scale-modal-message');
+        const scaleModalInput = document.getElementById('scale-modal-input');
+        const scaleModalOkBtn = document.getElementById('scale-modal-ok');
+        const scaleModalCancelBtn = document.getElementById('scale-modal-cancel');
+        // Save button
+        const saveLayoutBtn = document.getElementById('save-layout');
+
+
+        // --- State Variables ---
+        // (Existing state...)
+        let selectedTable = null;
+        let tableCounter = 0;
+        let dragOffsetX = 0, dragOffsetY = 0;
+        let touchDragOffsetX = null, touchDragOffsetY = null;
+        let isDragging = false;
+        let isSettingScale = false;
+        let scalePoints = [];
+        let pixelsPerUnit = null;
+        let scaleUnit = 'ft';
+        let currentPixelDist = 0; // Store pixel distance temporarily for modal callback
+
+
+        // --- Store original background styles ---
+        const originalBackground = {};
+        function storeOriginalBackground() {
+            const computedStyle = getComputedStyle(barnFloor);
+            originalBackground.image = barnFloor.style.backgroundImage || computedStyle.backgroundImage;
+            originalBackground.color = barnFloor.style.backgroundColor || computedStyle.backgroundColor;
+            originalBackground.size = barnFloor.style.backgroundSize || computedStyle.backgroundSize;
+            originalBackground.repeat = barnFloor.style.backgroundRepeat || computedStyle.backgroundRepeat;
+            originalBackground.position = barnFloor.style.backgroundPosition || computedStyle.backgroundPosition;
+        }
+        storeOriginalBackground();
+
+
+        // --- Utility Functions ---
+        function showMessage(message, duration = 2500) {
+            messageBox.textContent = message;
+            messageBox.classList.add('show');
+            setTimeout(() => { messageBox.classList.remove('show'); }, duration);
+        }
+
+        function updateControlStates() {
+            const scaleIsSet = pixelsPerUnit !== null;
+            const tableIsSelected = selectedTable !== null;
+            tableControlsOverlay.style.display = scaleIsSet ? 'none' : 'flex';
+            if (!scaleIsSet) tableControlsOverlay.textContent = 'Set scale first to enable table controls';
+            applySizeBtn.disabled = !(scaleIsSet && tableIsSelected);
+            selectedControlsOverlay.style.display = tableIsSelected ? 'none' : 'flex';
+            if (!tableIsSelected) selectedControlsOverlay.textContent = 'Select a table to enable actions';
+            rotateLeftBtn.disabled = !tableIsSelected;
+            rotateRightBtn.disabled = !tableIsSelected;
+            deleteBtn.disabled = !tableIsSelected;
+            sizeUnitLabel.textContent = scaleIsSet ? scaleUnit : 'px';
+            // Save button is always enabled if html2canvas is loaded
+            saveLayoutBtn.disabled = typeof html2canvas === 'undefined';
+             if (saveLayoutBtn.disabled) {
+                 console.warn("html2canvas library not found. Save button disabled.");
+             }
+        }
+
+        function selectTable(tableElement, event) {
+            if (isSettingScale || (isDragging && (event.type === 'click' || event.type === 'touchend')) || (event.type === 'touchstart' && isDragging)) return;
+            if (selectedTable === tableElement) return;
+            if (selectedTable) selectedTable.classList.remove('selected');
+            selectedTable = tableElement;
+            if (selectedTable) selectedTable.classList.add('selected');
+            updateControlStates();
+        }
+
+        function deselectTable() {
+             if (selectedTable) selectedTable.classList.remove('selected');
+             selectedTable = null;
+             updateControlStates();
+        }
+
+        // --- Scale Functions ---
+        function resetScale() {
+            console.log("Resetting scale..."); // Log reset
+            pixelsPerUnit = null;
+            scalePoints = [];
+            isSettingScale = false;
+            barnFloor.classList.remove('setting-scale');
+            setScaleBtn.textContent = 'Set Scale';
+            setScaleBtn.classList.remove('bg-red-500', 'hover:bg-red-600', 'animate-pulse-border');
+            setScaleBtn.classList.add('bg-cyan-500', 'hover:bg-cyan-600');
+            scaleStatusDisplay.textContent = 'Scale not set';
+            removeScaleMarkers();
+            updateControlStates();
+            showMessage('Scale reset.');
+            hideScaleModal();
+        }
+
+        function removeScaleMarkers() {
+            const markers = barnFloor.querySelectorAll('.scale-marker');
+            markers.forEach(marker => marker.remove());
+        }
+
+        function createScaleMarker(x, y) {
+            const marker = document.createElement('div');
+            marker.classList.add('scale-marker');
+            marker.style.left = `${x}px`;
+            marker.style.top = `${y}px`;
+            barnFloor.appendChild(marker);
+        }
+
+        // --- Custom Modal Functions ---
+        function showScaleModal(message) {
+            console.log("Showing scale modal with message:", message);
+            scaleModalMessage.textContent = message;
+            scaleModalInput.value = '';
+            scaleModalOverlay.classList.add('show');
+            scaleModalInput.focus();
+        }
+
+        function hideScaleModal() {
+            console.log("Hiding scale modal.");
+            scaleModalOverlay.classList.remove('show');
+        }
+
+        function handleScaleModalOk() {
+            console.log("Scale modal OK clicked.");
+            const realDistStr = scaleModalInput.value;
+            const realDist = parseFloat(realDistStr);
+            console.log("Parsed real distance from modal:", realDist);
+
+            if (isNaN(realDist) || realDist <= 0) {
+                console.warn("Invalid distance entered in modal:", realDistStr);
+                showMessage('Invalid distance entered. Please enter a positive number.');
+                scaleModalInput.value = '';
+                scaleModalInput.focus();
+                return;
+            }
+
+             if (currentPixelDist < 1) {
+                 console.error("Cannot set scale, pixel distance was invalid:", currentPixelDist);
+                 showMessage("Error setting scale (invalid points). Please try again.");
+                 hideScaleModal();
+                 resetScale();
+                 return;
+             }
+
+            pixelsPerUnit = currentPixelDist / realDist;
+            console.log("Scale calculated (pixelsPerUnit):", pixelsPerUnit);
+            scaleStatusDisplay.textContent = `1 ${scaleUnit} ≈ ${pixelsPerUnit.toFixed(2)} px`;
+            showMessage(`Scale set successfully! 1 ${scaleUnit} = ${pixelsPerUnit.toFixed(2)} px`);
+
+            isSettingScale = false;
+            barnFloor.classList.remove('setting-scale');
+            setScaleBtn.textContent = 'Set Scale';
+            setScaleBtn.classList.remove('bg-red-500', 'hover:bg-red-600', 'animate-pulse-border');
+            setScaleBtn.classList.add('bg-cyan-500', 'hover:bg-cyan-600');
+            removeScaleMarkers();
+            scalePoints = [];
+            currentPixelDist = 0;
+            hideScaleModal();
+            updateControlStates();
+        }
+
+        function handleScaleModalCancel() {
+            console.log("Scale modal Cancel clicked.");
+            showMessage('Scale setting cancelled.');
+            hideScaleModal();
+            resetScale();
+        }
+
+
+        // --- Main Interaction Logic ---
+        function handleFloorInteraction(event) {
+            if (!isSettingScale) {
+                 if (event.target === barnFloor) {
+                     deselectTable();
+                 }
+                 return;
+            }
+
+             event.preventDefault();
+             event.stopPropagation();
+
+            console.log("Floor interaction while setting scale. Event type:", event.type);
+            const rect = barnFloor.getBoundingClientRect();
+            let clientX, clientY;
+
+            if (event.type === 'touchstart') {
+                if (!event.touches || event.touches.length === 0) { console.warn("Touch event with no touch data."); return; }
+                clientX = event.touches[0].clientX;
+                clientY = event.touches[0].clientY;
+            } else {
+                clientX = event.clientX;
+                clientY = event.clientY;
+            }
+
+            const x = clientX - rect.left;
+            const y = clientY - rect.top;
+
+            if (x < 0 || x > rect.width || y < 0 || y > rect.height) { showMessage("Click inside the floor plan area."); return; }
+
+            scalePoints.push({ x, y });
+            createScaleMarker(x, y);
+            console.log("Scale point added:", {x, y}, "Total points:", scalePoints.length);
+
+            if (scalePoints.length === 1) {
+                showMessage('Click the second point for your known distance.');
+            } else if (scalePoints.length === 2) {
+                console.log("Second scale point added. Calculating distance...");
+                const p1 = scalePoints[0];
+                const p2 = scalePoints[1];
+                currentPixelDist = Math.sqrt(Math.pow(p2.x - p1.x, 2) + Math.pow(p2.y - p1.y, 2));
+                console.log("Pixel distance:", currentPixelDist);
+
+                console.log("Checking if pixelDist < 1:", currentPixelDist < 1);
+                if (currentPixelDist < 1) {
+                    console.warn("Pixel distance too small:", currentPixelDist);
+                    showMessage('Points are too close. Please try again.');
+                    resetScale();
+                    return;
+                }
+
+                scaleUnit = scaleUnitSelect.value;
+                console.log("Showing custom modal for distance in unit:", scaleUnit);
+                showScaleModal(`Enter the real distance between the two points in ${scaleUnit}:`);
+            }
+        } // End handleFloorInteraction
+
+        // --- Table Functions ---
+        function applySizeStyles(table) {
+             if (!table || pixelsPerUnit === null) {
+                 if (!table) console.error("ApplySizeStyles: No table provided.");
+                 if (pixelsPerUnit === null) showMessage("Scale not set. Cannot apply size.");
+                 return;
+             };
+             let unitWidth, unitHeight, pixelWidth, pixelHeight;
+             try {
+                 if (table.classList.contains('round')) {
+                     unitWidth = Math.max(0.1, parseFloat(roundDiameterInput.value) || 1);
+                     unitHeight = unitWidth;
+                     pixelWidth = Math.max(5, unitWidth * pixelsPerUnit);
+                     pixelHeight = pixelWidth;
+                     table.style.borderRadius = '50%';
+                 } else if (table.classList.contains('rectangle')) {
+                     unitWidth = Math.max(0.1, parseFloat(rectWidthInput.value) || 1);
+                     unitHeight = Math.max(0.1, parseFloat(rectHeightInput.value) || 1);
+                     pixelWidth = Math.max(5, unitWidth * pixelsPerUnit);
+                     pixelHeight = Math.max(5, unitHeight * pixelsPerUnit);
+                     table.style.borderRadius = '0.375rem';
+                 } else return;
+                 table.style.width = `${pixelWidth}px`;
+                 table.style.height = `${pixelHeight}px`;
+             } catch (error) {
+                 console.error("Error applying size styles:", error);
+                 showMessage("Error applying size. Check input values.");
+             }
+        }
+
+        function createTable(type, initialX = 50, initialY = 50) {
+             if (pixelsPerUnit === null) {
+                 showMessage("Please set the scale before adding tables.");
+                 setScaleBtn.classList.add('animate-pulse-border');
+                 setTimeout(() => setScaleBtn.classList.remove('animate-pulse-border'), 1500);
+                 return;
+             }
+            tableCounter++;
+            const table = document.createElement('div');
+            table.id = `table-${tableCounter}`;
+            table.classList.add('table', type);
+            table.style.left = `${initialX}px`;
+            table.style.top = `${initialY}px`;
+            table.dataset.rotation = '0';
+            table.textContent = type === 'round' ? 'O' : '[]';
+            applySizeStyles(table);
+            table.setAttribute('draggable', 'true');
+
+            // Event Listeners
+            table.addEventListener('click', (event) => { event.stopPropagation(); selectTable(table, event); });
+            table.addEventListener('touchstart', (event) => {
+                 event.stopPropagation();
+                 if (!isDragging) selectTable(table, event);
+                 const touch = event.touches[0];
+                 const rect = table.getBoundingClientRect();
+                 touchDragOffsetX = touch.clientX - rect.left;
+                 touchDragOffsetY = touch.clientY - rect.top;
+                 table.style.cursor = 'grabbing';
+                 table.style.zIndex = '20';
+            }, { passive: true });
+            table.addEventListener('dragstart', (event) => {
+                 if (selectedTable !== table) selectTable(table, event);
+                 const rect = table.getBoundingClientRect();
+                 dragOffsetX = event.clientX - rect.left;
+                 dragOffsetY = event.clientY - rect.top;
+                 event.dataTransfer.setData('text/plain', table.id);
+                 event.dataTransfer.effectAllowed = 'move';
+                 table.style.opacity = '0.7';
+                 table.style.zIndex = '20';
+            });
+            table.addEventListener('dragend', (event) => {
+                table.style.opacity = '1';
+                table.style.zIndex = '';
+                if (selectedTable !== table) selectTable(table, event);
+            });
+
+            barnFloor.appendChild(table);
+            selectTable(table, new Event('synthetic'));
+            showMessage(`Added ${type} table.`);
+        }
+
+        function rotateSelectedTable(angleDelta) {
+            if (!selectedTable) return;
+            let currentRotation = parseInt(selectedTable.dataset.rotation || '0', 10);
+            currentRotation = (currentRotation + angleDelta) % 360;
+            selectedTable.dataset.rotation = currentRotation;
+            selectedTable.style.transformOrigin = 'center center';
+            selectedTable.style.transform = `rotate(${currentRotation}deg)`;
+        }
+
+        function deleteSelectedTable() {
+            if (!selectedTable) return;
+            selectedTable.remove();
+            selectedTable = null;
+            updateControlStates();
+            showMessage(`Deleted table.`);
+        }
+
+        function clearAllTables() {
+            if (confirm('Are you sure you want to remove all tables?')) {
+                 const tables = barnFloor.querySelectorAll('.table');
+                 tables.forEach(table => table.remove());
+                 selectedTable = null;
+                 updateControlStates();
+                 showMessage('Cleared all tables.');
+            }
+        }
+
+        // --- Floor Plan Background Functions ---
+        function setFloorBackgroundFromFile(file) {
+            if (!file || !file.type.startsWith('image/')) return;
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                barnFloor.style.backgroundImage = `url(${e.target.result})`;
+                barnFloor.style.backgroundSize = 'contain';
+                barnFloor.style.backgroundRepeat = 'no-repeat';
+                barnFloor.style.backgroundPosition = 'center';
+                barnFloor.style.backgroundColor = '#dddddd';
+                showMessage('Floor plan background updated. Please set scale again.');
+                resetScale();
+            }
+            reader.onerror = function() { showMessage('Error reading file.'); }
+            reader.readAsDataURL(file);
+        }
+
+        function removeFloorBackground() {
+            barnFloor.style.backgroundImage = originalBackground.image;
+            barnFloor.style.backgroundSize = originalBackground.size;
+            barnFloor.style.backgroundRepeat = originalBackground.repeat;
+            barnFloor.style.backgroundPosition = originalBackground.position;
+            barnFloor.style.backgroundColor = originalBackground.color;
+            showMessage('Floor plan background removed.');
+            floorPlanInput.value = null;
+            resetScale();
+        }
+
+        // --- Save Layout Function ---
+        function saveLayoutAsImage() {
+            console.log("Attempting to save layout...");
+            showMessage("Generating image...", 1500);
+
+            // Temporarily hide selection styles for a cleaner image
+            const wasSelected = selectedTable; // Remember if a table was selected
+            if (selectedTable) {
+                selectedTable.classList.add('hide-selection');
+            }
+
+            // Use html2canvas
+            try {
+                html2canvas(barnFloor, {
+                    useCORS: true, // Important if background image might be external (though unlikely here)
+                    logging: false // Disable html2canvas internal logging unless debugging it
+                 }).then(canvas => {
+                    // Restore selection styles immediately after capture
+                    if (wasSelected) {
+                        wasSelected.classList.remove('hide-selection');
+                    }
+
+                    // Create a temporary link to trigger download
+                    const link = document.createElement('a');
+                    link.download = 'barn-layout.png'; // Filename
+                    link.href = canvas.toDataURL('image/png'); // Get image data
+                    link.click(); // Simulate click to download
+                    link.remove(); // Clean up the temporary link
+                    console.log("Layout image download triggered.");
+                    showMessage("Layout saved as barn-layout.png", 3000);
+
+                }).catch(err => {
+                     // Handle potential errors during canvas generation
+                     console.error("html2canvas failed:", err);
+                     showMessage("Error saving image. See console for details.", 4000);
+                     // Restore selection styles if error occurred
+                     if (wasSelected) {
+                         wasSelected.classList.remove('hide-selection');
+                     }
+                });
+            } catch (error) {
+                 console.error("Error setting up html2canvas:", error);
+                 showMessage("Error preparing image save. See console.", 4000);
+                 // Restore selection styles if error occurred
+                 if (wasSelected) {
+                      wasSelected.classList.remove('hide-selection');
+                 }
+            }
+        }
+
+
+        // --- Global Event Listeners ---
+        setScaleBtn.addEventListener('click', () => {
+            isSettingScale = !isSettingScale;
+            console.log("Set Scale button clicked. isSettingScale:", isSettingScale);
+            if (isSettingScale) {
+                deselectTable(); scalePoints = []; removeScaleMarkers();
+                barnFloor.classList.add('setting-scale');
+                setScaleBtn.textContent = 'Cancel Scale';
+                setScaleBtn.classList.remove('bg-cyan-500', 'hover:bg-cyan-600');
+                setScaleBtn.classList.add('bg-red-500', 'hover:bg-red-600');
+                showMessage('Click the first point for your known distance.', 5000);
+            } else { resetScale(); }
+        });
+
+        scaleUnitSelect.addEventListener('change', (event) => {
+             const newUnit = event.target.value; const oldUnit = scaleUnit; scaleUnit = newUnit;
+             console.log("Scale unit changed from", oldUnit, "to", newUnit);
+             if (pixelsPerUnit !== null) {
+                 const conversionFactor = (oldUnit === 'm' && newUnit === 'ft') ? 3.28084 : (oldUnit === 'ft' && newUnit === 'm') ? (1 / 3.28084) : 1;
+                 pixelsPerUnit *= conversionFactor;
+                 console.log("Converted pixelsPerUnit:", pixelsPerUnit);
+                 scaleStatusDisplay.textContent = `1 ${scaleUnit} ≈ ${pixelsPerUnit.toFixed(2)} px`;
+                 showMessage(`Unit changed. Scale updated to 1 ${scaleUnit} = ${pixelsPerUnit.toFixed(2)} px`);
+             }
+             updateControlStates();
+        });
+
+        // Modal Buttons
+        scaleModalOkBtn.addEventListener('click', handleScaleModalOk);
+        scaleModalCancelBtn.addEventListener('click', handleScaleModalCancel);
+        scaleModalOverlay.addEventListener('click', (event) => { if (event.target === scaleModalOverlay) handleScaleModalCancel(); });
+        scaleModalInput.addEventListener('keypress', (event) => { if (event.key === 'Enter') { event.preventDefault(); handleScaleModalOk(); } });
+
+        // Table Buttons
+        addRoundTableBtn.addEventListener('click', () => createTable('round'));
+        addRectTableBtn.addEventListener('click', () => createTable('rectangle'));
+        applySizeBtn.addEventListener('click', () => {
+            if (selectedTable && pixelsPerUnit !== null) { applySizeStyles(selectedTable); showMessage('Applied size to selected table.'); }
+            else if (pixelsPerUnit === null) { showMessage('Cannot apply size. Scale not set.'); }
+            else { showMessage('Select a table first.'); }
+        });
+
+        // Action Buttons
+        rotateLeftBtn.addEventListener('click', () => rotateSelectedTable(-15));
+        rotateRightBtn.addEventListener('click', () => rotateSelectedTable(15));
+        deleteBtn.addEventListener('click', deleteSelectedTable);
+        clearAllBtn.addEventListener('click', clearAllTables);
+        saveLayoutBtn.addEventListener('click', saveLayoutAsImage); // <-- Add listener for save button
+
+        // File Input
+        floorPlanInput.addEventListener('change', (event) => { const file = event.target.files[0]; if (file) setFloorBackgroundFromFile(file); });
+        removeBackgroundBtn.addEventListener('click', removeFloorBackground);
+
+        // Floor Interaction
+        barnFloor.addEventListener('click', handleFloorInteraction);
+        barnFloor.addEventListener('touchstart', handleFloorInteraction, { passive: false });
+
+        // Drag/Drop (Mouse)
+        barnFloor.addEventListener('dragover', (event) => { event.preventDefault(); event.dataTransfer.dropEffect = 'move'; });
+        barnFloor.addEventListener('drop', (event) => {
+            event.preventDefault();
+            const tableId = event.dataTransfer.getData('text/plain');
+            const droppedTable = document.getElementById(tableId);
+            if (droppedTable && droppedTable.classList.contains('table')) {
+                const barnRect = barnFloor.getBoundingClientRect();
+                let x = event.clientX - barnRect.left - dragOffsetX;
+                let y = event.clientY - barnRect.top - dragOffsetY;
+                const tableWidth = droppedTable.offsetWidth; const tableHeight = droppedTable.offsetHeight;
+                x = Math.max(0, Math.min(x, barnRect.width - tableWidth));
+                y = Math.max(0, Math.min(y, barnRect.height - tableHeight));
+                droppedTable.style.left = `${x}px`; droppedTable.style.top = `${y}px`;
+            }
+        });
+
+        // Drag (Touch)
+         document.body.addEventListener('touchmove', (event) => {
+            if (!selectedTable || touchDragOffsetX === null || !isDragging) return;
+            event.preventDefault();
+            const touch = event.touches[0];
+            const barnRect = barnFloor.getBoundingClientRect();
+            let x = touch.clientX - barnRect.left - touchDragOffsetX;
+            let y = touch.clientY - barnRect.top - touchDragOffsetY;
+            const tableWidth = selectedTable.offsetWidth; const tableHeight = selectedTable.offsetHeight;
+            x = Math.max(0, Math.min(x, barnRect.width - tableWidth));
+            y = Math.max(0, Math.min(y, barnRect.height - tableHeight));
+            selectedTable.style.left = `${x}px`; selectedTable.style.top = `${y}px`;
+        }, { passive: false });
+
+        document.body.addEventListener('touchend', (event) => {
+             if (selectedTable) { selectedTable.style.cursor = 'grab'; selectedTable.style.zIndex = ''; }
+             touchDragOffsetX = null; touchDragOffsetY = null;
+             setTimeout(() => { isDragging = false; }, 50);
+        });
+
+         document.body.addEventListener('touchmove', () => { if (selectedTable && touchDragOffsetX !== null && !isDragging) { isDragging = true; } }, { passive: true });
+
+
+        // --- Initial setup ---
+        console.log("Initializing application...");
+        updateControlStates();
+
+    </script>
+
+</body>
+</html>
