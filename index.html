@@ -87,6 +87,17 @@
                         <label class="text-xs text-gray-500 block mb-1">Item Label</label>
                         <input type="text" id="item-label-input" class="w-full border border-gray-200 rounded px-2 py-1 text-sm focus:ring-1 focus:ring-orange-300 outline-none">
                     </div>
+                    <!-- Added Dimensions Controls -->
+                    <div class="grid grid-cols-2 gap-2">
+                        <div>
+                            <label class="text-xs text-gray-500 block mb-1" id="width-label">Width (ft)</label>
+                            <input type="number" id="item-width-input" step="1" min="1" class="w-full border border-gray-200 rounded px-2 py-1 text-sm outline-none focus:ring-1 focus:ring-orange-300">
+                        </div>
+                        <div id="height-control-container">
+                            <label class="text-xs text-gray-500 block mb-1">Height (ft)</label>
+                            <input type="number" id="item-height-input" step="1" min="1" class="w-full border border-gray-200 rounded px-2 py-1 text-sm outline-none focus:ring-1 focus:ring-orange-300">
+                        </div>
+                    </div>
                     <div>
                         <label class="text-xs text-gray-500 flex items-center mb-1">
                             Rotation: <span id="rot-val" class="ml-auto font-mono">0°</span>
@@ -164,6 +175,10 @@
         const upload = document.getElementById('floorplan-upload');
         const inspector = document.getElementById('inspector-panel');
         const itemLabelInput = document.getElementById('item-label-input');
+        const itemWidthInput = document.getElementById('item-width-input');
+        const itemHeightInput = document.getElementById('item-height-input');
+        const widthLabel = document.getElementById('width-label');
+        const heightControlContainer = document.getElementById('height-control-container');
         const rotateSlider = document.getElementById('rotate-slider');
         const rotValDisplay = document.getElementById('rot-val');
         const snapToggle = document.getElementById('snap-toggle');
@@ -228,10 +243,22 @@
             document.getElementById('redo-btn').disabled = redoStack.length === 0;
             scaleStatus.textContent = pxf ? `Scale: ${pxf.toFixed(1)} px/ft` : "Scale: Not set";
             inspector.classList.toggle('hidden', !selectedItem);
+            
             if (selectedItem) {
                 itemLabelInput.value = selectedItem.label || '';
+                itemWidthInput.value = selectedItem.w;
+                itemHeightInput.value = selectedItem.h;
                 rotateSlider.value = selectedItem.angle || 0;
                 rotValDisplay.textContent = `${selectedItem.angle || 0}°`;
+                
+                // Adjust labels for round items
+                if (selectedItem.type === 'round') {
+                    widthLabel.textContent = "Diameter (ft)";
+                    heightControlContainer.classList.add('hidden');
+                } else {
+                    widthLabel.textContent = "Width (ft)";
+                    heightControlContainer.classList.remove('hidden');
+                }
             }
         }
 
@@ -352,7 +379,9 @@
             let found = null;
             for (let i = layoutItems.length - 1; i >= 0; i--) {
                 const it = layoutItems[i];
-                if (mx > it.x && mx < it.x + it.w * pxf && my > it.y && my < it.y + it.h * pxf) {
+                const wPx = it.w * pxf;
+                const hPx = it.h * pxf;
+                if (mx > it.x && mx < it.x + wPx && my > it.y && my < it.y + hPx) {
                     found = it;
                     break;
                 }
@@ -488,6 +517,25 @@
         };
         itemLabelInput.onchange = () => saveState();
 
+        // Size listeners
+        itemWidthInput.oninput = e => {
+            if (selectedItem) {
+                const val = parseFloat(e.target.value) || 1;
+                selectedItem.w = val;
+                if (selectedItem.type === 'round') selectedItem.h = val;
+                draw();
+            }
+        };
+        itemWidthInput.onchange = () => saveState();
+
+        itemHeightInput.oninput = e => {
+            if (selectedItem && selectedItem.type !== 'round') {
+                selectedItem.h = parseFloat(e.target.value) || 1;
+                draw();
+            }
+        };
+        itemHeightInput.onchange = () => saveState();
+
         rotateSlider.oninput = e => {
             if (selectedItem) {
                 selectedItem.angle = parseInt(e.target.value);
@@ -514,9 +562,7 @@
             if (!name) return;
             const data = JSON.stringify({
                 items: layoutItems,
-                pxf: pxf,
-                // We don't save the image data in JSON usually to keep it small, 
-                // but you can include the base64 if needed.
+                pxf: pxf
             });
             const blob = new Blob([data], { type: 'application/json' });
             const url = URL.createObjectURL(blob);
@@ -541,7 +587,6 @@
         };
 
         // Save Image (PNG) with Custom Filename Modal
-        let activeDownloadType = 'image';
         document.getElementById('download-image-btn').onclick = () => {
             document.getElementById('filename-modal').classList.add('show');
             document.getElementById('filename-input').value = 'Event Layout ' + new Date().toLocaleDateString();
